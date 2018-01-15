@@ -29,6 +29,7 @@ struct voice_session {
     struct pcm *pcm_sco_tx;
 
     int wb_amr_type;
+    int bt_sco_used;
     bool two_mic_control;
     bool two_mic_disabled;
 
@@ -38,18 +39,25 @@ struct voice_session {
 
 void prepare_voice_session(struct voice_session *session,
                            audio_devices_t active_out_devices);
-int start_voice_session(struct voice_session *session);
+int start_voice_session(struct voice_session *session,  bool bluetooth_wb);
 void stop_voice_session(struct voice_session *session);
+void start_ril_clock(struct voice_session *session);
+void stop_ril_clock(struct voice_session *session);
 void set_voice_session_volume(struct voice_session *session, float volume);
 void set_voice_session_audio_path(struct voice_session *session);
 void set_voice_session_mic_mute(struct voice_session *session, bool state);
 
-void start_voice_session_bt_sco(struct voice_session *session);
+void start_voice_session_bt_sco_tx(struct voice_session *session, bool bluetooth_wb);
+void start_voice_session_bt_sco_rx(struct voice_session *session, bool bluetooth_wb);
+void stop_voice_session_bt_sco_tx(struct voice_session *session);
+void stop_voice_session_bt_sco_rx(struct voice_session *session);
 
 bool voice_session_uses_twomic(struct voice_session *session);
 bool voice_session_uses_wideband(struct voice_session *session);
+void set_wb_amr_type(struct voice_session *session, int, bool btrunning);
 
 struct voice_session *voice_session_init(struct audio_device *adev);
 void voice_session_deinit(struct voice_session *s);
+
 
 #endif /* VOICE_CALL_H */

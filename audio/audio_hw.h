@@ -20,7 +20,6 @@
 
 #include <cutils/list.h>
 #include <hardware/audio.h>
-#include <hardware/audio_amplifier.h>
 
 #include <tinyalsa/asoundlib.h>
 #include <tinycompress/tinycompress.h>
@@ -132,15 +131,17 @@ enum {
 #define PLAYBACK_AVAILABLE_MIN 1
 
 
-#define SCO_PERIOD_SIZE 168
+#define SCO_PERIOD_SIZE 128
 #define SCO_PERIOD_COUNT 2
-#define SCO_DEFAULT_CHANNEL_COUNT 2
-#define SCO_DEFAULT_SAMPLING_RATE 16000
+#define SCO_PLAYBACK_DEFAULT_CHANNEL_COUNT 2
+#define SCO_CAPTURE_DEFAULT_CHANNEL_COUNT 1
+#define SCO_DEFAULT_SAMPLING_RATE 8000
+#define SCO_WB_SAMPLING_RATE 16000
 #define SCO_START_THRESHOLD 335
 #define SCO_STOP_THRESHOLD 336
 #define SCO_AVAILABLE_MIN 1
 
-#define PLAYBACK_HDMI_MULTI_PERIOD_SIZE  1024
+#define PLAYBACK_HDMI_MULTI_PERIOD_SIZE  1024256
 #define PLAYBACK_HDMI_MULTI_PERIOD_COUNT 4
 #define PLAYBACK_HDMI_MULTI_DEFAULT_CHANNEL_COUNT 6
 #define PLAYBACK_HDMI_MULTI_PERIOD_BYTES \
@@ -428,7 +429,6 @@ struct audio_device {
     int                     (*sound_trigger_close_for_streaming)(int);
 
     pthread_mutex_t         lock_inputs; /* see note below on mutex acquisition order */
-    amplifier_device_t      *amp;
 };
 
 /*

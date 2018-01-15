@@ -62,6 +62,14 @@ struct pcm_config pcm_config_voice_sco = {
     .format = PCM_FORMAT_S16_LE,
 };
 
+struct pcm_config pcm_config_voice_sco_wb = {
+    .channels = 1,
+    .rate = SCO_WB_SAMPLING_RATE,
+    .period_size = SCO_PERIOD_SIZE,
+    .period_count = SCO_PERIOD_COUNT,
+    .format = PCM_FORMAT_S16_LE,
+};
+
 /* Prototypes */
 int start_voice_call(struct audio_device *adev);
 int stop_voice_call(struct audio_device *adev);
@@ -147,8 +155,28 @@ static void stop_voice_session_bt_sco(struct voice_session *session) {
     }
 }
 
+void stop_voice_session_bt_sco_rx(struct voice_session *session) {
+    ALOGV("%s: Closing SCO RX PCMs", __func__);
+
+    if (session->pcm_sco_rx != NULL) {
+        pcm_stop(session->pcm_sco_rx);
+        pcm_close(session->pcm_sco_rx);
+        session->pcm_sco_rx = NULL;
+    }
+}
+
+void stop_voice_session_bt_sco_tx(struct voice_session *session) {
+    ALOGV("%s: Closing SCO TX PCMs", __func__);
+
+    if (session->pcm_sco_tx != NULL) {
+        pcm_stop(session->pcm_sco_tx);
+        pcm_close(session->pcm_sco_tx);
+        session->pcm_sco_tx = NULL;
+    }
+}
+
 /* must be called with the hw device mutex locked, OK to hold other mutexes */
-void start_voice_session_bt_sco(struct voice_session *session)
+static void start_voice_session_bt_sco(struct voice_session *session, bool bluetooth_wb)
 {
     struct pcm_config *voice_sco_config;
 
@@ -159,8 +187,13 @@ void start_voice_session_bt_sco(struct voice_session *session)
 
     ALOGV("%s: Opening SCO PCMs", __func__);
 
-    /* always use 16kHz for SCO */
-    voice_sco_config = &pcm_config_voice_sco;
+    if (bluetooth_wb) {
+        ALOGV("%s: bluetooth config wideband 16k", __func__);
+        voice_sco_config = &pcm_config_voice_sco_wb;
+    } else {
+        ALOGV("%s: bluetooth config narrowband 8k", __func__);
+        voice_sco_config = &pcm_config_voice_sco;
+    }
 
     session->pcm_sco_rx = pcm_open(SOUND_CARD,
                                    SOUND_PLAYBACK_SCO_DEVICE,
@@ -194,11 +227,87 @@ err_sco_rx:
     pcm_close(session->pcm_sco_rx);
     session->pcm_sco_rx = NULL;
 }
+void start_voice_session_bt_sco_tx(struct voice_session *session, bool bluetooth_wb)
+{
+    struct pcm_config *voice_sco_config;
+
+    if (session->pcm_sco_tx != NULL) {
+        ALOGW("%s: SCO TX PCMs already open!\n", __func__);
+        return;
+    }
+
+    ALOGV("%s: Opening SCO TX PCMs", __func__);
+
+    if (bluetooth_wb) {
+        ALOGV("%s: bluetooth config wideband 16k", __func__);
+        voice_sco_config = &pcm_config_voice_sco_wb;
+    } else {
+        ALOGV("%s: bluetooth config narrowband 8k", __func__);
+        voice_sco_config = &pcm_config_voice_sco;
+    }
+
+    session->pcm_sco_tx = pcm_open(SOUND_CARD,
+                                   SOUND_CAPTURE_SCO_DEVICE,
+                                   PCM_IN|PCM_MONOTONIC,
+                                   voice_sco_config);
+    if (session->pcm_sco_tx && !pcm_is_ready(session->pcm_sco_tx)) {
+        ALOGE("%s: cannot open PCM SCO TX stream: %s",
+              __func__, pcm_get_error(session->pcm_sco_tx));
+        goto err_sco_tx;
+    }
+
+    pcm_start(session->pcm_sco_tx);
+
+    return;
+
+err_sco_tx:
+    pcm_close(session->pcm_sco_tx);
+    session->pcm_sco_tx = NULL;
+}
+
+void start_voice_session_bt_sco_rx(struct voice_session *session, bool bluetooth_wb)
+{
+    struct pcm_config *voice_sco_config;
+
+    if (session->pcm_sco_rx != NULL) {
+        ALOGW("%s: SCO RX PCMs already open!\n", __func__);
+        return;
+    }
+
+    ALOGV("%s: Opening SCO RX PCMs", __func__);
+
+    if (bluetooth_wb) {
+        ALOGV("%s: bluetooth config wideband 16k", __func__);
+        voice_sco_config = &pcm_config_voice_sco_wb;
+    } else {
+        ALOGV("%s: bluetooth config narrowband 8k", __func__);
+        voice_sco_config = &pcm_config_voice_sco;
+    }
+
+    session->pcm_sco_rx = pcm_open(SOUND_CARD,
+                                   SOUND_PLAYBACK_SCO_DEVICE,
+                                   PCM_OUT|PCM_MONOTONIC,
+                                   voice_sco_config);
+    if (session->pcm_sco_rx != NULL && !pcm_is_ready(session->pcm_sco_rx)) {
+        ALOGE("%s: cannot open PCM SCO RX stream: %s",
+              __func__, pcm_get_error(session->pcm_sco_rx));
+        goto err_sco_rx;
+    }
+
+    pcm_start(session->pcm_sco_rx);
+
+    return;
+
+err_sco_rx:
+    pcm_close(session->pcm_sco_rx);
+    session->pcm_sco_rx = NULL;
+}
+
 /*
  * This function must be called with hw device mutex locked, OK to hold other
  * mutexes
  */
-int start_voice_session(struct voice_session *session)
+int start_voice_session(struct voice_session *session, bool bluetooth_wb)
 {
     struct pcm_config *voice_config;
 
@@ -219,6 +328,7 @@ int start_voice_session(struct voice_session *session)
     }
 
     /* Open modem PCM channels */
+
     session->pcm_voice_rx = pcm_open(SOUND_CARD,
                                      SOUND_PLAYBACK_VOICE_DEVICE,
                                      PCM_OUT|PCM_MONOTONIC,
@@ -253,7 +363,7 @@ int start_voice_session(struct voice_session *session)
     pcm_start(session->pcm_voice_tx);
 
     if (session->out_device & AUDIO_DEVICE_OUT_ALL_SCO) {
-        start_voice_session_bt_sco(session);
+        start_voice_session_bt_sco(session, bluetooth_wb);
     }
 
 #ifdef AUDIENCE_EARSMART_IC
@@ -269,8 +379,10 @@ int start_voice_session(struct voice_session *session)
         ril_set_two_mic_control(&session->ril, AUDIENCE, TWO_MIC_SOLUTION_OFF);
     }
 
+    ALOGV("%s: setting ril_set_call_clock_sync", __func__);
     ril_set_call_clock_sync(&session->ril, SOUND_CLOCK_START);
 
+    ALOGV("%s: exit", __func__);
     return 0;
 }
 
@@ -298,9 +410,7 @@ void stop_voice_session(struct voice_session *session)
         status++;
     }
 
-    if (session->out_device & AUDIO_DEVICE_OUT_ALL_SCO) {
-        stop_voice_session_bt_sco(session);
-    }
+    stop_voice_session_bt_sco(session);
 
 #ifdef AUDIENCE_EARSMART_IC
     ALOGV("%s: Disabling Audience IC", __func__);
@@ -308,6 +418,8 @@ void stop_voice_session(struct voice_session *session)
 #endif
 
     session->out_device = AUDIO_DEVICE_NONE;
+
+    ril_set_call_clock_sync(&session->ril, SOUND_CLOCK_STOP);
 
     ALOGV("%s: Successfully closed %d active PCMs", __func__, status);
 }
@@ -369,6 +481,8 @@ static void voice_session_wb_amr_callback(void *data, int wb_amr_type)
 
     pthread_mutex_lock(&adev->lock);
 
+    ALOGV("%s: %s wide band voice call CALLBACK RECEIVED (WB_AMR=%d)",__func__,wb_amr_type > 0 ? "Enable" : "Disable",wb_amr_type);
+
     if (session->wb_amr_type != wb_amr_type) {
         session->wb_amr_type = wb_amr_type;
 
@@ -393,6 +507,33 @@ static void voice_session_wb_amr_callback(void *data, int wb_amr_type)
     pthread_mutex_unlock(&adev->lock);
 }
 
+void set_wb_amr_type(struct voice_session *session, int i, bool btrunning)
+{
+    char voice_config[PROPERTY_VALUE_MAX];
+    int force;
+
+    if (btrunning) {
+        force = property_get("audio_hal.force_voice_config", voice_config, "");
+
+        if (force > 0) {
+            if ((strncmp(voice_config, "narrow", 6)) == 0)
+                session->wb_amr_type = 0;
+            else if ((strncmp(voice_config, "wide", 4)) == 0)
+                session->wb_amr_type = 1;
+            ALOGV("%s: Forcing non-BT audio_hal.force_voice_config from build.prop: %s", __func__, voice_config);
+        } else {
+            session->wb_amr_type = i;
+        }
+    } else {
+        if ((strncmp(voice_config, "true", 4)) == 0) {
+            session->wb_amr_type = 1;
+            ALOGV("%s: Forcing voice.bluetooth_wb config from build.prop: %s", __func__, voice_config);
+        } else {
+            session->wb_amr_type = i;
+        }
+    }
+}
+
 struct voice_session *voice_session_init(struct audio_device *adev)
 {
     char voice_config[PROPERTY_VALUE_MAX];
@@ -406,6 +547,7 @@ struct voice_session *voice_session_init(struct audio_device *adev)
 
     /* Two mic control */
     ret = property_get_bool("audio_hal.disable_two_mic", false);
+
     if (ret > 0) {
         session->two_mic_disabled = true;
     }
@@ -418,12 +560,13 @@ struct voice_session *voice_session_init(struct audio_device *adev)
     }
 
     ret = property_get("audio_hal.force_voice_config", voice_config, "");
+
     if (ret > 0) {
         if ((strncmp(voice_config, "narrow", 6)) == 0)
             session->wb_amr_type = 0;
         else if ((strncmp(voice_config, "wide", 4)) == 0)
             session->wb_amr_type = 1;
-        ALOGV("%s: Forcing voice config: %s", __func__, voice_config);
+        ALOGV("%s: Forcing voice config from build.prop: %s", __func__, voice_config);
     } else {
         if (RIL_UNSOL_SNDMGR_WB_AMR_REPORT > 0) {
             /* register callback for wideband AMR setting */
